@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+
 import java.util.List;
 import java.util.Optional;
 
@@ -71,7 +72,6 @@ public class TaskController {
             execution.setStartTime(new java.util.Date());
 
             ProcessBuilder processBuilder = new ProcessBuilder();
-            // This is a simple way to handle commands for both Windows and Linux/macOS
             if (System.getProperty("os.name").toLowerCase().contains("win")) {
                 processBuilder.command("cmd.exe", "/c", task.getCommand());
             } else {
@@ -80,37 +80,46 @@ public class TaskController {
 
             Process process = processBuilder.start();
 
-            // Capture output
-            java.io.InputStream inputStream = process.getInputStream();
-            java.util.Scanner scanner = new java.util.Scanner(inputStream).useDelimiter("\\A");
-            String output = scanner.hasNext() ? scanner.next() : "";
+            java.util.Scanner stdInputScanner = new java.util.Scanner(process.getInputStream()).useDelimiter("\\A");
+            String stdOutput = stdInputScanner.hasNext() ? stdInputScanner.next() : "";
+
+            java.util.Scanner stdErrorScanner = new java.util.Scanner(process.getErrorStream()).useDelimiter("\\A");
+            String stdError = stdErrorScanner.hasNext() ? stdErrorScanner.next() : "";
             
             int exitCode = process.waitFor();
             execution.setEndTime(new java.util.Date());
 
-            if (exitCode == 0) {
-                execution.setOutput(output);
-            } else {
-                // Capture error stream if command fails
-                java.io.InputStream errorStream = process.getErrorStream();
-                java.util.Scanner errorScanner = new java.util.Scanner(errorStream).useDelimiter("\\A");
-                String errorOutput = errorScanner.hasNext() ? errorScanner.next() : "";
-                execution.setOutput("Error executing command. Exit code: " + exitCode + "\nOutput:\n" + output + "\nError:\n" + errorOutput);
+            // Combine both outputs. The error stream often contains useful info even on success.
+            StringBuilder combinedOutput = new StringBuilder();
+            if (!stdOutput.isEmpty()) {
+                combinedOutput.append("--- Standard Output ---\n");
+                combinedOutput.append(stdOutput);
+            }
+            if (!stdError.isEmpty()) {
+                if (combinedOutput.length() > 0) combinedOutput.append("\n\n");
+                combinedOutput.append("--- Standard Error ---\n");
+                combinedOutput.append(stdError);
             }
             
-            // Add the new execution to the task's list
+            // Add a final status message
+            combinedOutput.append("\n\n--- Status ---\n");
+            combinedOutput.append("Command finished with exit code: ").append(exitCode);
+            
+            execution.setOutput(combinedOutput.toString());
+            
+            // --- END OF CORRECTION ---
+
             if (task.getTaskExecutions() == null) {
                 task.setTaskExecutions(new java.util.ArrayList<>());
             }
             task.getTaskExecutions().add(execution);
 
-            // Save the updated task
             taskRepository.save(task);
 
             return new ResponseEntity<>(task, HttpStatus.OK);
 
         } catch (Exception e) {
-            e.printStackTrace(); // Log the exception for debugging
+            e.printStackTrace();
             return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
